@@ -780,7 +780,7 @@ config BUILD_KDDI
         help
           For KDDI we need to do some additional fixes.
 
--config QSD_SVS
+config QSD_SVS
 	bool "QSD Static Voltage Scaling"
 	depends on (ARCH_MSM_SCORPION)
 	default y
@@ -793,7 +793,6 @@ config QSD_PMIC_DEFAULT_DCDC1
 	default 1275
 	help
 	  This is the PMIC voltage at Linux kernel boot.
->>>>>>> bff2c84... Add HAVS
 
 config CACHE_FLUSH_RANGE_LIMIT
 	hex "Cache flush range limit"
