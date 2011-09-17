@@ -504,6 +504,7 @@ obj-$(CONFIG_MACH_MAHIMAHI) += board-mahimahi-smb329.o
 
 obj-$(CONFIG_ARCH_MSM_SCORPION) += pmu.o
 obj-$(CONFIG_ARCH_MSM_SCORPIONMP) += pmu.o
+obj-$(CONFIG_MSM_CPU_AVS) += avs.o avs_hw.o
 
 ifeq ($(CONFIG_ARCH_MSM8X60),y)
 obj-$(CONFIG_MSM8X60_SSBI) += ssbi_8x60.o
