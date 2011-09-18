@@ -28,8 +28,16 @@
 #include <mach/msm_iomap.h>
 
 #include "acpuclock.h"
+#ifdef CONFIG_MSM_CPU_AVS
 #include "avs.h"
+#endif
 #include "proc_comm.h"
+#include "clock.h"
+
+#ifdef CONFIG_CPU_FREQ_VDD_LEVELS
+#include "board-incrediblec.h"
+#endif
+
 
 #if 0
 #define DEBUG(x...) pr_info(x)
@@ -59,6 +67,7 @@ struct clkctl_acpu_speed {
 	int      vdd;
 	unsigned axiclk_khz;
 };
+static unsigned long max_axi_rate;
 
 struct regulator {
 	struct device *dev;
@@ -112,7 +121,6 @@ struct clkctl_acpu_speed acpu_freq_tbl[] = {
         { 1113600, CCTL(CLK_TCXO, 1),           SRC_SCPLL, 0x1D, 0, 1300, 128000 },
 	{ 0 },
 };
-static unsigned long max_axi_rate;
 
 /* select the standby clock that is used when switching scpll
  * frequencies
@@ -128,9 +136,6 @@ struct clkctl_acpu_speed *acpu_mpll = &acpu_freq_tbl[2];
 #ifdef CONFIG_CPU_FREQ_TABLE
 static struct cpufreq_frequency_table freq_table[ARRAY_SIZE(acpu_freq_tbl)];
 
-struct clk *clk_get(struct device *dev, const char *id);
-int clk_set_rate(struct clk *clk, unsigned long rate);
-
 static void __init acpuclk_init_cpufreq_table(void)
 {
 	int i;
@@ -140,8 +145,7 @@ static void __init acpuclk_init_cpufreq_table(void)
 		freq_table[i].frequency = CPUFREQ_ENTRY_INVALID;
 
 		/* Define speeds that we want to skip */
-		if (/* acpu_freq_tbl[i].acpu_khz == 256000 || */
-				acpu_freq_tbl[i].acpu_khz == 19200 ||
+		if (acpu_freq_tbl[i].acpu_khz == 19200 ||
 				acpu_freq_tbl[i].acpu_khz == 128000 || 
 				acpu_freq_tbl[i].acpu_khz == 256000)
 			continue;
@@ -154,7 +158,7 @@ static void __init acpuclk_init_cpufreq_table(void)
 			continue;
 		}
 
-		/* Add to the table */
+		/* Take the fastest speed available at the specified VDD level */
 		//if (vdd != acpu_freq_tbl[i + 1].vdd)
 			freq_table[i].frequency = acpu_freq_tbl[i].acpu_khz;
 	}
@@ -182,6 +186,11 @@ struct clock_state {
 };
 
 static struct clock_state drv_state = { 0 };
+
+
+struct clk *clk_get(struct device *dev, const char *id);
+unsigned long clk_get_rate(struct clk *clk);
+int clk_set_rate(struct clk *clk, unsigned long rate);
 
 static DEFINE_SPINLOCK(acpu_lock);
 
@@ -312,7 +321,6 @@ static int acpu_set_vdd(int vdd)
 		}
 		pr_info("acpu_set_vdd got regulator\n");
 	}
-
 	rc = tps65023_set_dcdc1_level(drv_state.regulator->rdev, vdd);
 
 	if (rc == -ENODEV && vdd <= CONFIG_QSD_PMIC_DEFAULT_DCDC1)
@@ -392,6 +400,7 @@ int acpuclk_set_rate(unsigned long rate, enum setrate_reason reason)
 	      next->clk_sel, next->clk_cfg, next->sc_l_value);
 
 	if (next->clk_sel == SRC_SCPLL) {
+		/* curr -> standby(MPLL speed) -> target */
 		if (!IS_ACPU_STANDBY(cur))
 			select_clock(acpu_stby->clk_sel, acpu_stby->clk_cfg);
 		loops_per_jiffy = next->lpj;
@@ -412,11 +421,14 @@ int acpuclk_set_rate(unsigned long rate, enum setrate_reason reason)
 
 	spin_unlock_irqrestore(&acpu_lock, flags);
 
+#ifndef CONFIG_AXI_SCREEN_POLICY
 	if (reason == SETRATE_CPUFREQ || reason == SETRATE_PC) {
 		if (cur->axiclk_khz != next->axiclk_khz)
 			clk_set_rate(drv_state.clk_ebi1, next->axiclk_khz * 1000);
+		DEBUG("acpuclk_set_rate switch axi to %d\n",
+			clk_get_rate(drv_state.clk_ebi1));
 	}
-
+#endif
 	if (reason == SETRATE_CPUFREQ) {
 #ifdef CONFIG_MSM_CPU_AVS
 		/* notify avs after changing frequency */
@@ -464,7 +476,6 @@ static int pll_request(unsigned id, unsigned on)
 	on = !!on;
 	return msm_proc_comm(PCOM_CLKCTL_RPC_PLL_REQUEST, &id, &on);
 }
-
 
 /* Spare register populated with efuse data on max ACPU freq. */
 #define CT_CSR_PHYS             0xA8700000
@@ -608,8 +619,9 @@ void __init msm_acpu_clock_init(struct msm_acpu_clock_platform_data *clkdata)
 	acpuclk_init_cpufreq_table();
 
 	drv_state.clk_ebi1 = clk_get(NULL,"ebi1_clk");
+#ifndef CONFIG_AXI_SCREEN_POLICY
 	clk_set_rate(drv_state.clk_ebi1, drv_state.current_speed->axiclk_khz * 1000);
-
+#endif
 #ifdef CONFIG_MSM_CPU_AVS
 	if (!acpu_avs_init(drv_state.acpu_set_vdd,
 		drv_state.current_speed->acpu_khz)) {
@@ -618,3 +630,42 @@ void __init msm_acpu_clock_init(struct msm_acpu_clock_platform_data *clkdata)
 	}
 #endif
 }
+
+#ifdef CONFIG_CPU_FREQ_VDD_LEVELS
+#ifndef CONFIG_MSM_CPU_AVS
+ssize_t acpuclk_get_vdd_levels_str(char *buf)
+{
+	int i, len = 0;
+	if (buf)
+	{
+		mutex_lock(&drv_state.lock);
+		for (i = 0; acpu_freq_tbl[i].acpu_khz; i++) 
+		{
+			if (freq_table[i].frequency != CPUFREQ_ENTRY_INVALID)
+				len += sprintf(buf + len, "%8u: %4d\n", acpu_freq_tbl[i].acpu_khz, acpu_freq_tbl[i].vdd);
+		}
+		mutex_unlock(&drv_state.lock);
+	}
+	return len;
+}
+
+void acpuclk_set_vdd(unsigned acpu_khz, int vdd)
+{
+	int i;
+	vdd = vdd / 25 * 25;	//! regulator only accepts multiples of 25 (mV)
+	mutex_lock(&drv_state.lock);
+	for (i = 0; acpu_freq_tbl[i].acpu_khz; i++)
+	{
+		if (freq_table[i].frequency != CPUFREQ_ENTRY_INVALID)
+		{
+			if (acpu_khz == 0)
+				acpu_freq_tbl[i].vdd = min(max((acpu_freq_tbl[i].vdd + vdd), INCREDIBLEC_MIN_UV_MV), INCREDIBLEC_MAX_UV_MV);
+			else if (acpu_freq_tbl[i].acpu_khz == acpu_khz)
+				acpu_freq_tbl[i].vdd = min(max(vdd, INCREDIBLEC_MIN_UV_MV), INCREDIBLEC_MAX_UV_MV);
+		}
+	}
+	mutex_unlock(&drv_state.lock);
+}
+
+#endif
+#endif
