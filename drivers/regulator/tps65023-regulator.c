@@ -631,7 +631,10 @@ static int __devexit tps_65023_remove(struct i2c_client *client)
 	struct tps_pmic *tps = i2c_get_clientdata(client);
 	int i;
 
-	for (i = 0; i < TPS65023_NUM_REGULATOR; i++)
+	/* clear the client data in i2c */
+	i2c_set_clientdata(client, NULL);
+
+        for (i = 0; i < TPS65023_NUM_REGULATOR; i++)
 		regulator_unregister(tps->rdev[i]);
 
 	kfree(tps);
