@@ -100,7 +100,7 @@ usr/gen_init_cpio
 usr/initramfs_data.cpio
 arch/arm/boot/compressed/lib1funcs.S
 arch/arm/boot/compressed/piggy.gzip
-
+include/config/tristate.conf
 
 
 \#*#
