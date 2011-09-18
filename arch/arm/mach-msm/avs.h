@@ -29,7 +29,7 @@
 #ifndef AVS_H
 #define AVS_H
 
-#include "board-incredible.h"
+#include "board-incrediblec.h"
 #define VOLTAGE_MIN  		INCREDIBLEC_MIN_UV_MV /* mV */
 #define VOLTAGE_MAX  		INCREDIBLEC_MAX_UV_MV
 #define	VOLTAGE_MIN_START	950	// Minimum value to start off with
